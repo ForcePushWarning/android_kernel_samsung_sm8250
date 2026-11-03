@@ -1645,19 +1645,6 @@ static void binder_free_txn_fixups(struct binder_transaction *t)
 		kmem_cache_free(binder_fixup_pool, fixup);
 	}
 }
-static void binder_txn_latency_free(struct binder_transaction *t)
-{
-	int from_proc, from_thread, to_proc, to_thread;
-
-	spin_lock(&t->lock);
-	from_proc = t->from ? t->from->proc->pid : 0;
-	from_thread = t->from ? t->from->pid : 0;
-	to_proc = t->to_proc ? t->to_proc->pid : 0;
-	to_thread = t->to_thread ? t->to_thread->pid : 0;
-	spin_unlock(&t->lock);
-
-	trace_binder_txn_latency_free(t, from_proc, from_thread, to_proc, to_thread);
-}
 
 static void binder_free_transaction(struct binder_transaction *t)
 {
@@ -1688,9 +1675,6 @@ static void binder_free_transaction(struct binder_transaction *t)
 			t->buffer->transaction = NULL;
 		binder_inner_proc_unlock(target_proc);
 	}
-
-	if (trace_binder_txn_latency_free_enabled())
-		binder_txn_latency_free(t);
 
 	if (target_thread)
 		binder_thread_dec_tmpref(target_thread);
