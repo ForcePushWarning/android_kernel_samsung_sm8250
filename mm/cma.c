@@ -55,7 +55,7 @@ EXPORT_SYMBOL(cma_get_size);
 
 const char *cma_get_name(const struct cma *cma)
 {
-	return cma->name ? cma->name : "(undefined)";
+	return cma->name;
 }
 EXPORT_SYMBOL_GPL(cma_get_name);
 
@@ -88,13 +88,14 @@ static void cma_clear_bitmap(struct cma *cma, unsigned long pfn,
 			     unsigned long count)
 {
 	unsigned long bitmap_no, bitmap_count;
+	unsigned long flags;
 
 	bitmap_no = (pfn - cma->base_pfn) >> cma->order_per_bit;
 	bitmap_count = cma_bitmap_pages_to_bits(cma, count);
 
-	mutex_lock(&cma->lock);
+	spin_lock_irqsave(&cma->lock, flags);
 	bitmap_clear(cma->bitmap, bitmap_no, bitmap_count);
-	mutex_unlock(&cma->lock);
+	spin_unlock_irqrestore(&cma->lock, flags);
 }
 
 static int cma_showmem_notifier(struct notifier_block *nb,
@@ -155,7 +156,7 @@ static int __init cma_activate_area(struct cma *cma)
 		init_cma_reserved_pageblock(pfn_to_page(base_pfn));
 	} while (--i);
 
-	mutex_init(&cma->lock);
+	spin_lock_init(&cma->lock);
 
 #ifdef CONFIG_CMA_DEBUGFS
 	INIT_HLIST_HEAD(&cma->mem_head);
@@ -237,13 +238,12 @@ int __init cma_init_reserved_mem(phys_addr_t base, phys_addr_t size,
 	 * subsystems (like slab allocator) are available.
 	 */
 	cma = &cma_areas[cma_area_count];
-	if (name) {
-		cma->name = name;
-	} else {
-		cma->name = kasprintf(GFP_KERNEL, "cma%d\n", cma_area_count);
-		if (!cma->name)
-			return -ENOMEM;
-	}
+
+	if (name)
+		snprintf(cma->name, CMA_MAX_NAME, name);
+	else
+		snprintf(cma->name, CMA_MAX_NAME,  "cma%d\n", cma_area_count);
+
 	cma->base_pfn = PFN_DOWN(base);
 	cma->count = size >> PAGE_SHIFT;
 	cma->order_per_bit = order_per_bit;
@@ -417,7 +417,7 @@ static void cma_debug_show_areas(struct cma *cma)
 	unsigned long nr_part, nr_total = 0;
 	unsigned long nbits = cma_bitmap_maxno(cma);
 
-	mutex_lock(&cma->lock);
+	spin_lock_irq(&cma->lock);
 	pr_info("number of available pages: ");
 	for (;;) {
 		next_zero_bit = find_next_zero_bit(cma->bitmap, nbits, start);
@@ -432,7 +432,7 @@ static void cma_debug_show_areas(struct cma *cma)
 		start = next_zero_bit + nr_zero;
 	}
 	pr_cont("=> %lu free of %lu total pages\n", nr_total, cma->count);
-	mutex_unlock(&cma->lock);
+	spin_unlock_irq(&cma->lock);
 }
 
 /**
@@ -465,13 +465,13 @@ struct page *__cma_alloc(struct cma *cma, unsigned long count,
 		return NULL;
 
 	if (!cma || !cma->count || !cma->bitmap)
-		return NULL;
+		goto out;
 
 	pr_debug("%s(cma %p, count %lu, align %d)\n", __func__, (void *)cma,
 		 count, align);
 
 	if (!count)
-		return NULL;
+		goto out;
 
 	trace_cma_alloc_start(count, align);
 
@@ -481,10 +481,10 @@ struct page *__cma_alloc(struct cma *cma, unsigned long count,
 	bitmap_count = cma_bitmap_pages_to_bits(cma, count);
 
 	if (bitmap_count > bitmap_maxno)
-		return NULL;
+		goto out;
 
 	for (;;) {
-		mutex_lock(&cma->lock);
+		spin_lock_irq(&cma->lock);
 		bitmap_no = bitmap_find_next_zero_area_off(cma->bitmap,
 				bitmap_maxno, start, bitmap_count, mask,
 				offset);
@@ -508,12 +508,12 @@ struct page *__cma_alloc(struct cma *cma, unsigned long count,
 				 * for 100ms and retry twice to see if it has
 				 * been freed later.
 				 */
-				mutex_unlock(&cma->lock);
+				spin_unlock_irq(&cma->lock);
 				msleep(100);
 				retry_after_sleep++;
 				continue;
 			} else {
-				mutex_unlock(&cma->lock);
+				spin_unlock_irq(&cma->lock);
 				break;
 			}
 		}
@@ -525,7 +525,7 @@ struct page *__cma_alloc(struct cma *cma, unsigned long count,
 		 * our exclusive use. If the migration fails we will take the
 		 * lock again and unmark it.
 		 */
-		mutex_unlock(&cma->lock);
+		spin_unlock_irq(&cma->lock);
 
 		pfn = cma->base_pfn + (bitmap_no << cma->order_per_bit);
 		mutex_lock(&cma_mutex);
@@ -543,12 +543,13 @@ struct page *__cma_alloc(struct cma *cma, unsigned long count,
 		pr_debug("%s(): memory range at %p is busy, retrying\n",
 			 __func__, pfn_to_page(pfn));
 
-		trace_cma_alloc_busy_retry(pfn, pfn_to_page(pfn), count, align);
+		trace_cma_alloc_busy_retry(cma->name, pfn, pfn_to_page(pfn),
+					   count, align);
 		/* try again with a bit different memory target */
 		start = bitmap_no + mask + 1;
 	}
 
-	trace_cma_alloc(pfn, page, count, align);
+	trace_cma_alloc_finish(cma->name, pfn, page, count, align);
 
 	/*
 	 * CMA can allocate multiple page blocks, which results in different
@@ -567,6 +568,16 @@ struct page *__cma_alloc(struct cma *cma, unsigned long count,
 	}
 
 	pr_debug("%s(): returned %p\n", __func__, page);
+out:
+	if (page) {
+		count_vm_event(CMA_ALLOC_SUCCESS);
+		cma_sysfs_account_success_pages(cma, count);
+	} else {
+		count_vm_event(CMA_ALLOC_FAIL);
+		if (cma)
+			cma_sysfs_account_fail_pages(cma, count);
+	}
+
 	return page;
 }
 EXPORT_SYMBOL_GPL(__cma_alloc);
@@ -618,7 +629,8 @@ bool cma_release(struct cma *cma, const struct page *pages,
 
 	free_contig_range(pfn, count);
 	cma_clear_bitmap(cma, pfn, count);
-	trace_cma_release(pfn, pages, count);
+	cma_sysfs_account_release_pages(cma, count);
+	trace_cma_release(cma->name, pfn, pages, count);
 
 	return true;
 }

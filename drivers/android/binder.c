@@ -1689,9 +1689,6 @@ static void binder_free_transaction(struct binder_transaction *t)
 		binder_inner_proc_unlock(target_proc);
 	}
 
-	if (trace_binder_txn_latency_free_enabled())
-		binder_txn_latency_free(t);
-
 	if (target_thread)
 		binder_thread_dec_tmpref(target_thread);
 
