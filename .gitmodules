@@ -3,7 +3,7 @@
 	url = https://github.com/vc-teahouse/Baseband-guard
 [submodule "KernelSU"]
 	path = KernelSU
-	url = https://github.com/doubledashdot/sKernelSU
+	url = https://github.com/ForcePushWarning/KernelSU
 [submodule "NoMount"]
 	path = NoMount
 	url = https://github.com/maxsteeel/nomount
