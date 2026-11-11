@@ -27,7 +27,9 @@
 #include <openssl/evp.h>
 #include <openssl/pem.h>
 #include <openssl/err.h>
+#if !defined(OPENSSL_VERSION_MAJOR) || OPENSSL_VERSION_MAJOR < 4
 #include <openssl/engine.h>
+#endif
 
 /*
  * OpenSSL 3.0 deprecates the OpenSSL's ENGINE API.
@@ -99,7 +101,8 @@ static void display_openssl_errors(int l)
 	}
 }
 
-#ifndef OPENSSL_NO_ENGINE
+#if !defined(OPENSSL_NO_ENGINE) && \
+    (!defined(OPENSSL_VERSION_MAJOR) || OPENSSL_VERSION_MAJOR < 4)
 static void drain_openssl_errors(void)
 {
 	const char *file;
@@ -146,7 +149,8 @@ static EVP_PKEY *read_private_key(const char *private_key_name)
 	EVP_PKEY *private_key;
 	BIO *b;
 
-#ifndef OPENSSL_NO_ENGINE
+#if !defined(OPENSSL_NO_ENGINE) && \
+    (!defined(OPENSSL_VERSION_MAJOR) || OPENSSL_VERSION_MAJOR < 4)
 	if (!strncmp(private_key_name, "pkcs11:", 7)) {
 		ENGINE *e;
 
@@ -166,6 +170,9 @@ static EVP_PKEY *read_private_key(const char *private_key_name)
 		ERR(!private_key, "%s", private_key_name);
 		return private_key;
 	}
+#elif defined(OPENSSL_VERSION_MAJOR) && OPENSSL_VERSION_MAJOR >= 4
+	if (!strncmp(private_key_name, "pkcs11:", 7))
+		ERR(1, "PKCS#11 ENGINE is unavailable in OpenSSL 4");
 #endif
 
 	b = BIO_new_file(private_key_name, "rb");
