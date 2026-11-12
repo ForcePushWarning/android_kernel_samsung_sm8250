@@ -9,6 +9,7 @@
 #include <linux/sched/numa_balancing.h>
 #include <linux/tracepoint.h>
 #include <linux/binfmts.h>
+#include <linux/cpumask.h>
 
 /*
  * Tracepoint for calling kthread_stop, performed to end a kthread:
@@ -152,7 +153,6 @@ TRACE_EVENT(sched_enq_deq_task,
 		__field(int,		cpu)
 		__field(bool,		enqueue)
 		__field(unsigned int,	nr_running)
-		__field(unsigned long,	cpu_load)
 		__field(unsigned int,	rt_nr_running)
 		__field(unsigned int,	cpus_allowed)
 		__field(unsigned int,	demand)
@@ -166,19 +166,18 @@ TRACE_EVENT(sched_enq_deq_task,
 		__entry->cpu		= task_cpu(p);
 		__entry->enqueue	= enqueue;
 		__entry->nr_running	= task_rq(p)->nr_running;
-		__entry->cpu_load	= task_rq(p)->cpu_load[0];
 		__entry->rt_nr_running	= task_rq(p)->rt.rt_nr_running;
 		__entry->cpus_allowed	= cpus_allowed;
 		__entry->demand		= task_load(p);
 		__entry->pred_demand	= task_pl(p);
 	),
 
-	TP_printk("cpu=%d %s comm=%s pid=%d prio=%d nr_running=%u cpu_load=%lu rt_nr_running=%u affine=%x demand=%u pred_demand=%u",
+	TP_printk("cpu=%d %s comm=%s pid=%d prio=%d nr_running=%u rt_nr_running=%u affine=%x demand=%u pred_demand=%u",
 			__entry->cpu,
 			__entry->enqueue ? "enqueue" : "dequeue",
 			__entry->comm, __entry->pid,
 			__entry->prio, __entry->nr_running,
-			__entry->cpu_load, __entry->rt_nr_running,
+			__entry->rt_nr_running,
 			__entry->cpus_allowed, __entry->demand,
 			__entry->pred_demand)
 );
@@ -809,7 +808,7 @@ TRACE_EVENT(sched_load_cfs_rq,
 		__trace_sched_path(cfs_rq, __get_dynamic_array(path),
 				   __get_dynamic_array_len(path));
 		__entry->load		= cfs_rq->avg.load_avg;
-		__entry->rbl_load 	= cfs_rq->avg.runnable_load_avg;
+		__entry->rbl_load 	= cfs_rq->avg.runnable_avg;
 		__entry->util		= cfs_rq->avg.util_avg;
 	),
 
@@ -915,7 +914,7 @@ TRACE_EVENT(sched_load_se,
 				      p ? TASK_COMM_LEN : sizeof("(null)"));
 		__entry->pid = p ? p->pid : -1;
 		__entry->load = se->avg.load_avg;
-		__entry->rbl_load = se->avg.runnable_load_avg;
+		__entry->rbl_load = se->avg.runnable_avg;
 		__entry->util = se->avg.util_avg;
 	),
 
@@ -967,7 +966,6 @@ TRACE_EVENT(sched_util_est_task,
 		__field( pid_t,		pid			)
 		__field( int,		cpu			)
 		__field( unsigned int,	util_avg		)
-		__field( unsigned int,	est_enqueued		)
 		__field( unsigned int,	est_ewma		)
 
 	),
@@ -977,17 +975,15 @@ TRACE_EVENT(sched_util_est_task,
 		__entry->pid			= tsk->pid;
 		__entry->cpu			= task_cpu(tsk);
 		__entry->util_avg		= avg->util_avg;
-		__entry->est_enqueued		= avg->util_est.enqueued;
-		__entry->est_ewma		= avg->util_est.ewma;
+		__entry->est_ewma		= avg->util_est & ~UTIL_AVG_UNCHANGED;
 	),
 
-	TP_printk("comm=%s pid=%d cpu=%d util_avg=%u util_est_ewma=%u util_est_enqueued=%u",
+	TP_printk("comm=%s pid=%d cpu=%d util_avg=%u util_est_ewma=%u",
 		  __entry->comm,
 		  __entry->pid,
 		  __entry->cpu,
 		  __entry->util_avg,
-		  __entry->est_ewma,
-		  __entry->est_enqueued)
+		  __entry->est_ewma)
 );
 
 /*
@@ -1008,7 +1004,7 @@ TRACE_EVENT(sched_util_est_cpu,
 	TP_fast_assign(
 		__entry->cpu			= cpu;
 		__entry->util_avg		= cfs_rq->avg.util_avg;
-		__entry->util_est_enqueued	= cfs_rq->avg.util_est.enqueued;
+		__entry->util_est_enqueued	= cfs_rq->avg.util_est;
 	),
 
 	TP_printk("cpu=%d util_avg=%u util_est_enqueued=%u",
@@ -1031,7 +1027,6 @@ TRACE_EVENT(sched_cpu_util,
 		__field(unsigned int,	capacity_curr)
 		__field(unsigned int,	capacity)
 		__field(unsigned int,	capacity_orig)
-		__field(int,		idle_state)
 		__field(u64,		irqload)
 		__field(int,		online)
 		__field(int,		isolated)
@@ -1048,20 +1043,19 @@ TRACE_EVENT(sched_cpu_util,
 		__entry->capacity_curr      = capacity_curr_of(cpu);
 		__entry->capacity           = capacity_of(cpu);
 		__entry->capacity_orig      = capacity_orig_of(cpu);
-		__entry->idle_state         = idle_get_state_idx(cpu_rq(cpu));
 		__entry->irqload            = sched_irqload(cpu);
 		__entry->online             = cpu_online(cpu);
-		__entry->isolated           = cpu_isolated(cpu);
+		__entry->isolated           = cpumask_test_cpu(cpu, cpu_isolated_mask);
 		__entry->reserved           = is_reserved(cpu);
 		__entry->high_irq_load      = sched_cpu_high_irqload(cpu);
 		__entry->nr_rtg_high_prio_tasks = walt_nr_rtg_high_prio(cpu);
 	),
 
-	TP_printk("cpu=%d nr_running=%d cpu_util=%ld cpu_util_cum=%ld capacity_curr=%u capacity=%u capacity_orig=%u idle_state=%d irqload=%llu online=%u, isolated=%u, reserved=%u, high_irq_load=%u nr_rtg_hp=%u",
+	TP_printk("cpu=%d nr_running=%d cpu_util=%ld cpu_util_cum=%ld capacity_curr=%u capacity=%u capacity_orig=%u irqload=%llu online=%u, isolated=%u, reserved=%u, high_irq_load=%u nr_rtg_hp=%u",
 		__entry->cpu, __entry->nr_running, __entry->cpu_util,
 		__entry->cpu_util_cum, __entry->capacity_curr,
 		__entry->capacity, __entry->capacity_orig,
-		__entry->idle_state, __entry->irqload, __entry->online,
+		__entry->irqload, __entry->online,
 		__entry->isolated, __entry->reserved, __entry->high_irq_load,
 		__entry->nr_rtg_high_prio_tasks)
 );

@@ -6,11 +6,14 @@
 #include <linux/bpf.h>
 #include <linux/filter.h>
 
+#ifndef CONFIG_TRACE_GPU_MEM
 #define CREATE_TRACE_POINTS
 #include <trace/events/gpu_mem.h>
 
 EXPORT_TRACEPOINT_SYMBOL(gpu_mem_total);
+#endif
 
+#ifndef CONFIG_BPF_EVENTS
 const struct bpf_func_proto * __weak bpf_tracing_func_proto(
 	enum bpf_func_id func_id, const struct bpf_prog *prog)
 {
@@ -74,3 +77,4 @@ const struct bpf_verifier_ops tracing_verifier_ops = {
 
 const struct bpf_prog_ops tracing_prog_ops = {
 };
+#endif /* CONFIG_BPF_EVENTS */

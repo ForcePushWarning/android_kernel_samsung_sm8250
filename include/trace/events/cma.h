@@ -19,7 +19,7 @@ DECLARE_EVENT_CLASS(cma_alloc_class,
 		__string(name, name)
 		__field(unsigned long, pfn)
 		__field(const struct page *, page)
-		__field(unsigned long, count)
+		__field(unsigned int, count)
 		__field(unsigned int, align)
 	),
 
@@ -50,7 +50,7 @@ TRACE_EVENT(cma_release,
 		__string(name, name)
 		__field(unsigned long, pfn)
 		__field(const struct page *, page)
-		__field(unsigned long, count)
+		__field(unsigned int, count)
 	),
 
 	TP_fast_assign(
