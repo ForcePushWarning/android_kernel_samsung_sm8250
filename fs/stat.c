@@ -21,10 +21,6 @@
 #include <linux/uaccess.h>
 #include <asm/unistd.h>
 
-#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-extern void susfs_sus_kstat_spoof_generic_fillattr(struct inode *inode, struct kstat *stat);
-#endif
-
 /**
  * generic_fillattr - Fill in the basic attributes from the inode struct
  * @inode: Inode to use as the source
@@ -152,109 +148,6 @@ int vfs_statx_fd(unsigned int fd, struct kstat *stat,
 }
 EXPORT_SYMBOL(vfs_statx_fd);
 
-
-#ifdef CONFIG_KSU_SUSFS_SUS_KSTAT
-/*
- * SUSFS KSTAT must only affect userspace stat syscalls.
- * Keep the exported VFS interfaces unchanged for kernel callers.
- */
-static int susfs_vfs_statx_fd(unsigned int fd, struct kstat *stat,
-			      u32 request_mask, unsigned int query_flags)
-{
-	struct fd f;
-	int error = -EBADF;
-
-	if (query_flags & ~KSTAT_QUERY_FLAGS)
-		return -EINVAL;
-
-	f = fdget_raw(fd);
-	if (f.file) {
-		error = vfs_getattr(&f.file->f_path, stat,
-				    request_mask, query_flags);
-		if (!error)
-			susfs_sus_kstat_spoof_generic_fillattr(
-				d_backing_inode(f.file->f_path.dentry), stat);
-		fdput(f);
-	}
-
-	return error;
-}
-
-static int susfs_vfs_statx(int dfd, const char __user *filename, int flags,
-			   struct kstat *stat, u32 request_mask)
-{
-	struct path path;
-	int error = -EINVAL;
-	unsigned int lookup_flags = LOOKUP_FOLLOW | LOOKUP_AUTOMOUNT;
-
-	if (flags & ~(AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT |
-		      AT_EMPTY_PATH | KSTAT_QUERY_FLAGS))
-		return -EINVAL;
-
-	if (flags & AT_SYMLINK_NOFOLLOW)
-		lookup_flags &= ~LOOKUP_FOLLOW;
-	if (flags & AT_NO_AUTOMOUNT)
-		lookup_flags &= ~LOOKUP_AUTOMOUNT;
-	if (flags & AT_EMPTY_PATH)
-		lookup_flags |= LOOKUP_EMPTY;
-
-retry:
-	error = user_path_at(dfd, filename, lookup_flags, &path);
-	if (error)
-		goto out;
-
-	error = vfs_getattr(&path, stat, request_mask, flags);
-	if (!error)
-		susfs_sus_kstat_spoof_generic_fillattr(
-			d_backing_inode(path.dentry), stat);
-	path_put(&path);
-
-	if (retry_estale(error, lookup_flags)) {
-		lookup_flags |= LOOKUP_REVAL;
-		goto retry;
-	}
-
-out:
-	return error;
-}
-
-static inline int susfs_vfs_stat(const char __user *filename,
-				 struct kstat *stat)
-{
-	return susfs_vfs_statx(AT_FDCWD, filename, AT_NO_AUTOMOUNT,
-			       stat, STATX_BASIC_STATS);
-}
-
-static inline int susfs_vfs_lstat(const char __user *filename,
-				  struct kstat *stat)
-{
-	return susfs_vfs_statx(AT_FDCWD, filename,
-			       AT_SYMLINK_NOFOLLOW | AT_NO_AUTOMOUNT,
-			       stat, STATX_BASIC_STATS);
-}
-
-static inline int susfs_vfs_fstatat(int dfd, const char __user *filename,
-				    struct kstat *stat, int flags)
-{
-	return susfs_vfs_statx(dfd, filename, flags | AT_NO_AUTOMOUNT,
-			       stat, STATX_BASIC_STATS);
-}
-
-static inline int susfs_vfs_fstat(int fd, struct kstat *stat)
-{
-	return susfs_vfs_statx_fd(fd, stat, STATX_BASIC_STATS, 0);
-}
-#else /* !CONFIG_KSU_SUSFS_SUS_KSTAT */
-
-#define susfs_vfs_stat       vfs_stat
-#define susfs_vfs_lstat      vfs_lstat
-#define susfs_vfs_fstatat    vfs_fstatat
-#define susfs_vfs_fstat      vfs_fstat
-#define susfs_vfs_statx      vfs_statx
-
-#endif /* CONFIG_KSU_SUSFS_SUS_KSTAT */
-
-
 /**
  * vfs_statx - Get basic and extra attributes by filename
  * @dfd: A file descriptor representing the base dir for a relative filename
@@ -354,7 +247,7 @@ SYSCALL_DEFINE2(stat, const char __user *, filename,
 	struct kstat stat;
 	int error;
 
-	error = susfs_vfs_stat(filename, &stat);
+	error = vfs_stat(filename, &stat);
 	if (error)
 		return error;
 
@@ -367,7 +260,7 @@ SYSCALL_DEFINE2(lstat, const char __user *, filename,
 	struct kstat stat;
 	int error;
 
-	error = susfs_vfs_lstat(filename, &stat);
+	error = vfs_lstat(filename, &stat);
 	if (error)
 		return error;
 
@@ -377,7 +270,7 @@ SYSCALL_DEFINE2(lstat, const char __user *, filename,
 SYSCALL_DEFINE2(fstat, unsigned int, fd, struct __old_kernel_stat __user *, statbuf)
 {
 	struct kstat stat;
-	int error = susfs_vfs_fstat(fd, &stat);
+	int error = vfs_fstat(fd, &stat);
 
 	if (!error)
 		error = cp_old_stat(&stat, statbuf);
@@ -440,7 +333,7 @@ SYSCALL_DEFINE2(newstat, const char __user *, filename,
 		struct stat __user *, statbuf)
 {
 	struct kstat stat;
-	int error = susfs_vfs_stat(filename, &stat);
+	int error = vfs_stat(filename, &stat);
 
 	if (error)
 		return error;
@@ -453,7 +346,7 @@ SYSCALL_DEFINE2(newlstat, const char __user *, filename,
 	struct kstat stat;
 	int error;
 
-	error = susfs_vfs_lstat(filename, &stat);
+	error = vfs_lstat(filename, &stat);
 	if (error)
 		return error;
 
@@ -467,7 +360,7 @@ SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,
 	struct kstat stat;
 	int error;
 
-	error = susfs_vfs_fstatat(dfd, filename, &stat, flag);
+	error = vfs_fstatat(dfd, filename, &stat, flag);
 	if (error)
 		return error;
 	return cp_new_stat(&stat, statbuf);
@@ -477,7 +370,7 @@ SYSCALL_DEFINE4(newfstatat, int, dfd, const char __user *, filename,
 SYSCALL_DEFINE2(newfstat, unsigned int, fd, struct stat __user *, statbuf)
 {
 	struct kstat stat;
-	int error = susfs_vfs_fstat(fd, &stat);
+	int error = vfs_fstat(fd, &stat);
 
 	if (!error)
 		error = cp_new_stat(&stat, statbuf);
@@ -580,7 +473,7 @@ SYSCALL_DEFINE2(stat64, const char __user *, filename,
 		struct stat64 __user *, statbuf)
 {
 	struct kstat stat;
-	int error = susfs_vfs_stat(filename, &stat);
+	int error = vfs_stat(filename, &stat);
 
 	if (!error)
 		error = cp_new_stat64(&stat, statbuf);
@@ -592,7 +485,7 @@ SYSCALL_DEFINE2(lstat64, const char __user *, filename,
 		struct stat64 __user *, statbuf)
 {
 	struct kstat stat;
-	int error = susfs_vfs_lstat(filename, &stat);
+	int error = vfs_lstat(filename, &stat);
 
 	if (!error)
 		error = cp_new_stat64(&stat, statbuf);
@@ -603,7 +496,7 @@ SYSCALL_DEFINE2(lstat64, const char __user *, filename,
 SYSCALL_DEFINE2(fstat64, unsigned long, fd, struct stat64 __user *, statbuf)
 {
 	struct kstat stat;
-	int error = susfs_vfs_fstat(fd, &stat);
+	int error = vfs_fstat(fd, &stat);
 
 	if (!error)
 		error = cp_new_stat64(&stat, statbuf);
@@ -617,7 +510,7 @@ SYSCALL_DEFINE4(fstatat64, int, dfd, const char __user *, filename,
 	struct kstat stat;
 	int error;
 
-	error = susfs_vfs_fstatat(dfd, filename, &stat, flag);
+	error = vfs_fstatat(dfd, filename, &stat, flag);
 	if (error)
 		return error;
 	return cp_new_stat64(&stat, statbuf);
@@ -682,7 +575,7 @@ SYSCALL_DEFINE5(statx,
 	if ((flags & AT_STATX_SYNC_TYPE) == AT_STATX_SYNC_TYPE)
 		return -EINVAL;
 
-	error = susfs_vfs_statx(dfd, filename, flags, &stat, mask);
+	error = vfs_statx(dfd, filename, flags, &stat, mask);
 	if (error)
 		return error;
 
@@ -731,7 +624,7 @@ COMPAT_SYSCALL_DEFINE2(newstat, const char __user *, filename,
 	struct kstat stat;
 	int error;
 
-	error = susfs_vfs_stat(filename, &stat);
+	error = vfs_stat(filename, &stat);
 	if (error)
 		return error;
 	return cp_compat_stat(&stat, statbuf);
@@ -743,7 +636,7 @@ COMPAT_SYSCALL_DEFINE2(newlstat, const char __user *, filename,
 	struct kstat stat;
 	int error;
 
-	error = susfs_vfs_lstat(filename, &stat);
+	error = vfs_lstat(filename, &stat);
 	if (error)
 		return error;
 	return cp_compat_stat(&stat, statbuf);
@@ -757,7 +650,7 @@ COMPAT_SYSCALL_DEFINE4(newfstatat, unsigned int, dfd,
 	struct kstat stat;
 	int error;
 
-	error = susfs_vfs_fstatat(dfd, filename, &stat, flag);
+	error = vfs_fstatat(dfd, filename, &stat, flag);
 	if (error)
 		return error;
 	return cp_compat_stat(&stat, statbuf);
@@ -768,7 +661,7 @@ COMPAT_SYSCALL_DEFINE2(newfstat, unsigned int, fd,
 		       struct compat_stat __user *, statbuf)
 {
 	struct kstat stat;
-	int error = susfs_vfs_fstat(fd, &stat);
+	int error = vfs_fstat(fd, &stat);
 
 	if (!error)
 		error = cp_compat_stat(&stat, statbuf);
