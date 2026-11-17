@@ -3197,19 +3197,29 @@ LZ4_FORCE_O2
 int LZ4_decompress_safe(const char *source, char *dest, int compressedSize,
 			int maxDecompressedSize)
 {
+#if defined(CONFIG_ARM64) && defined(CONFIG_KERNEL_MODE_NEON)
+	return LZ4_arm64_decompress_safe(source, dest, compressedSize,
+				      maxDecompressedSize, false);
+#else
 	return LZ4_decompress_generic(source, dest, compressedSize,
 				      maxDecompressedSize, decode_full_block,
 				      noDict, (BYTE *)dest, NULL, 0);
+#endif
 }
 
 LZ4_FORCE_O2
 int LZ4_decompress_safe_partial(const char *src, char *dst, int compressedSize,
 				int targetOutputSize, int dstCapacity)
 {
+#if defined(CONFIG_ARM64) && defined(CONFIG_KERNEL_MODE_NEON)
+	return LZ4_arm64_decompress_safe_partial(src, dst, compressedSize,
+				      dstCapacity, false);
+#else
 	dstCapacity = MIN(targetOutputSize, dstCapacity);
 	return LZ4_decompress_generic(src, dst, compressedSize, dstCapacity,
 				      partial_decode, noDict, (BYTE *)dst, NULL,
 				      0);
+#endif
 }
 
 LZ4_FORCE_O2
