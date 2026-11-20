@@ -1,3 +1,6 @@
 [submodule "NoMount"]
 	path = NoMount
 	url = git@github.com:maxsteeel/nomount.git
+[submodule "Baseband-guard"]
+	path = Baseband-guard
+	url = git@github.com:vc-teahouse/Baseband-guard.git
