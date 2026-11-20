@@ -156,7 +156,7 @@ int ksmbd_tree_conn_session_logoff(struct ksmbd_session *sess)
 	if (!sess)
 		return -EINVAL;
 
-	xa_for_each(&sess->tree_conns, id, tc) {
+	xa_for_each(&sess->tree_conns, tc, id, ULONG_MAX, XA_PRESENT) {
 		write_lock(&sess->tree_conns_lock);
 		if (tc->t_state == TREE_DISCONNECTED) {
 			write_unlock(&sess->tree_conns_lock);

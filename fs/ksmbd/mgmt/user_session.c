@@ -32,7 +32,7 @@ static void free_channel_list(struct ksmbd_session *sess)
 	struct channel *chann;
 	unsigned long index;
 
-	xa_for_each(&sess->ksmbd_chann_list, index, chann) {
+	xa_for_each(&sess->ksmbd_chann_list, chann, index, ULONG_MAX, XA_PRESENT) {
 		xa_erase(&sess->ksmbd_chann_list, index);
 		kfree(chann);
 	}
@@ -59,7 +59,7 @@ static void ksmbd_session_rpc_clear_list(struct ksmbd_session *sess)
 	struct ksmbd_session_rpc *entry;
 	long index;
 
-	xa_for_each(&sess->rpc_handle_list, index, entry) {
+	xa_for_each(&sess->rpc_handle_list, entry, index, ULONG_MAX, XA_PRESENT) {
 		xa_erase(&sess->rpc_handle_list, index);
 		__session_rpc_close(sess, entry);
 	}
@@ -175,7 +175,7 @@ static void ksmbd_expire_session(struct ksmbd_conn *conn)
 	struct ksmbd_session *sess;
 
 	down_write(&conn->session_lock);
-	xa_for_each(&conn->sessions, id, sess) {
+	xa_for_each(&conn->sessions, sess, id, ULONG_MAX, XA_PRESENT) {
 		if (sess->state != SMB2_SESSION_VALID ||
 		    time_after(jiffies,
 			       sess->last_active + SMB2_SESSION_TIMEOUT)) {
@@ -240,11 +240,11 @@ void ksmbd_sessions_deregister(struct ksmbd_conn *conn)
 	up_write(&sessions_table_lock);
 
 	down_write(&conn->session_lock);
-	xa_for_each(&conn->sessions, id, sess) {
+	xa_for_each(&conn->sessions, sess, id, ULONG_MAX, XA_PRESENT) {
 		unsigned long chann_id;
 		struct channel *chann;
 
-		xa_for_each(&sess->ksmbd_chann_list, chann_id, chann) {
+		xa_for_each(&sess->ksmbd_chann_list, chann, chann_id, ULONG_MAX, XA_PRESENT) {
 			if (chann->conn != conn)
 				ksmbd_conn_set_exiting(chann->conn);
 		}
