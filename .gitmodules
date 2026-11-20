@@ -4,3 +4,6 @@
 [submodule "Baseband-guard"]
 	path = Baseband-guard
 	url = git@github.com:vc-teahouse/Baseband-guard.git
+[submodule "KernelSU"]
+	path = KernelSU
+	url = git@github.com:ForcePushWarning/KernelSU.git
