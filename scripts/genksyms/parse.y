@@ -204,12 +204,26 @@ init_declarator:
 /* Hang on to the specifiers so that we can reuse them.  */
 decl_specifier_seq_opt:
 	/* empty */				{ decl_spec = NULL; }
+	| decl_specifier_seq			{ decl_spec = *$1; }
+	;
+
+/*
+ * Unlike decl_specifier_seq_opt, this does not touch decl_spec, so that
+ * a struct/union body nested in a parameter list does not clobber it.
+ */
+member_decl_specifier_seq_opt:
+	/* empty */				{ $$ = NULL; }
 	| decl_specifier_seq
 	;
 
+/*
+ * Do not set decl_spec here; decl_specifier_seq is also used for parameter
+ * declarations, which would clobber the specifiers of the enclosing
+ * declaration, e.g. "int a, f(int);".
+ */
 decl_specifier_seq:
-	decl_specifier				{ decl_spec = *$1; }
-	| decl_specifier_seq decl_specifier	{ decl_spec = *$2; }
+	decl_specifier				{ $$ = $1; }
+	| decl_specifier_seq decl_specifier	{ $$ = $2; }
 	;
 
 decl_specifier:
@@ -448,7 +462,7 @@ member_specification:
 	;
 
 member_declaration:
-	decl_specifier_seq_opt member_declarator_list_opt ';'
+	member_decl_specifier_seq_opt member_declarator_list_opt ';'
 		{ $$ = $3; }
 	| error ';'
 		{ $$ = $2; }
