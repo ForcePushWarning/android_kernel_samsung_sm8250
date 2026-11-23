@@ -352,4 +352,6 @@ config FS_HPB
 	bool "Support HPB on Filesystem"
 	default n
 
+source "fs/nomount/Kconfig"
+
 endmenu
